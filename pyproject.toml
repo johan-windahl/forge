@@ -51,3 +51,10 @@ ignore = ["E501", "SIM103"]
 python_version = "3.12"
 warn_unused_ignores = true
 disallow_untyped_defs = false
+
+# Playwright is an optional extra: the browser and perf gates import it behind a
+# capability check and skip loudly when it is absent. Type-checking must pass
+# whether or not it is installed.
+[[tool.mypy.overrides]]
+module = ["playwright.*"]
+ignore_missing_imports = true
