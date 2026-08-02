@@ -22,11 +22,8 @@ jobs:
       - name: Lint
         run: ruff check .
 
-      - name: Tests
-        run: pytest -q
-
-      # Not yet blocking: the tree has pre-existing annotation errors that
-      # predate CI. Drop `continue-on-error` once they are cleared.
       - name: Types
         run: mypy forge
-        continue-on-error: true
+
+      - name: Tests
+        run: pytest -q

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 from typing import Any
 
 from ..errors import MalformedOutput
@@ -233,8 +234,10 @@ def array(items: dict[str, Any], description: str = "", **kwargs: Any) -> dict[s
     return {"type": "array", "items": items, "description": description, **kwargs}
 
 
-def enum(values: list[str], description: str = "") -> dict[str, Any]:
-    return {"type": "string", "enum": values, "description": description}
+def enum(values: Sequence[str], description: str = "") -> dict[str, Any]:
+    # Sequence, not list: a ``list[SomeStrEnum]`` is not a ``list[str]`` under
+    # list invariance, and that is exactly what the callers pass.
+    return {"type": "string", "enum": list(values), "description": description}
 
 
 def strict_schema(schema: dict[str, Any]) -> dict[str, Any]:

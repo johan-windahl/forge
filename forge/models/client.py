@@ -596,7 +596,7 @@ class ModelClient:
     def _emit_error(self, request: Request, route: Route, exc: Exception) -> None:
         from ..errors import ForgeError
 
-        payload = {
+        payload: dict[str, Any] = {
             "model": route.model,
             "task_class": str(request.profile.task_class),
             "error": str(exc),

@@ -193,11 +193,13 @@ def compute_metrics(
         for n in nodes
         if n.started_at and n.finished_at
     ]
-    durations.sort(key=lambda item: -item["duration"])
+    durations.sort(key=lambda item: float(item["duration"]), reverse=True)
     metrics.slowest_nodes = durations[:8]
 
-    costs = [{"id": n.id, "title": n.title, "cost": n.cost, "kind": n.kind} for n in nodes if n.cost > 0]
-    costs.sort(key=lambda item: -item["cost"])
+    costs: list[dict[str, Any]] = [
+        {"id": n.id, "title": n.title, "cost": n.cost, "kind": n.kind} for n in nodes if n.cost > 0
+    ]
+    costs.sort(key=lambda item: float(item["cost"]), reverse=True)
     metrics.costliest_nodes = costs[:8]
 
     # -- spend -----------------------------------------------------------

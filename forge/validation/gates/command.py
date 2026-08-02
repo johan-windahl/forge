@@ -500,6 +500,6 @@ def custom_command_gate(name: str, command: str, **kwargs: Any) -> type[Gate]:
     _Custom.order = kwargs.get("order", 80)
     _Custom.blocking = kwargs.get("blocking", True)
     _Custom.timeout = kwargs.get("timeout", 900.0)
-    _Custom.command = lambda self, ctx: command  # type: ignore[assignment]
-    _Custom.applicable = lambda self, ctx: True  # type: ignore[assignment]
+    _Custom.command = lambda self, ctx: command  # type: ignore[method-assign]
+    _Custom.applicable = lambda self, ctx: True  # type: ignore[method-assign]
     return register(_Custom)

@@ -97,13 +97,13 @@ class Section:
             return marker + "\n" + cut
         if self.head_lines and self.tail_lines:
             half = max(1, keep // 2)
-            head = self.content[:half]
-            tail = self.content[-half:]
-            if "\n" in head:
-                head = head.rsplit("\n", 1)[0]
-            if "\n" in tail:
-                tail = tail.split("\n", 1)[1]
-            return head + marker + "\n" + tail
+            head_text = self.content[:half]
+            tail_text = self.content[-half:]
+            if "\n" in head_text:
+                head_text = head_text.rsplit("\n", 1)[0]
+            if "\n" in tail_text:
+                tail_text = tail_text.split("\n", 1)[1]
+            return head_text + marker + "\n" + tail_text
 
         cut = self.content[:keep]
         if "\n" in cut:

@@ -22,7 +22,7 @@ from __future__ import annotations
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from ..errors import GateError
 from ..kernel.events import Event, EventType
@@ -89,7 +89,13 @@ class GateRunner:
         fail_fast: bool | None = None,
         use_cache: bool | None = None,
     ) -> ValidationReport:
-        resolved = self.resolve(gates) if gates and isinstance(gates[0], str) else list(gates)  # type: ignore[arg-type]
+        # The union is `list[str] | list[Gate]`, so indexing one element decides
+        # which. Casting keeps `resolved` a `list[Gate]`; without it every later
+        # `.order`/`.name` access degrades to `object`.
+        if gates and isinstance(gates[0], str):
+            resolved = self.resolve(cast("list[str]", gates))
+        else:
+            resolved = cast("list[Gate]", list(gates))
         fail_fast = self.config.validation.fail_fast if fail_fast is None else fail_fast
         use_cache = self.config.validation.cache_results if use_cache is None else use_cache
 

@@ -19,6 +19,7 @@ state you needed was never stored.
 
 from __future__ import annotations
 
+import builtins
 from dataclasses import dataclass
 from typing import Any
 
@@ -212,7 +213,9 @@ class CheckpointManager:
         )
         return checkpoint
 
-    def _reopen_discarded(self, checkpoint: Checkpoint) -> list[str]:
+    # ``builtins.list``: this class defines a ``list`` method, which shadows the
+    # builtin for every annotation evaluated in class scope.
+    def _reopen_discarded(self, checkpoint: Checkpoint) -> builtins.list[str]:
         """Nodes whose completed work this rollback just threw away."""
         if self.graph is None:
             return []

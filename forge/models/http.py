@@ -88,7 +88,8 @@ class _KeepAliveHTTPSHandler(urllib.request.HTTPSHandler):
         # HTTPSHandler.__init__ and the attribute no longer exists on modern
         # Pythons. Passing it raised AttributeError on the first real HTTPS call
         # -- which no test caught, because they all went over plain HTTP.
-        return self.do_open(_KeepAliveHTTPSConnection, req, context=self._context)
+        # `_context` is set by HTTPSHandler.__init__ but is absent from typeshed.
+        return self.do_open(_KeepAliveHTTPSConnection, req, context=self._context)  # type: ignore[attr-defined]
 
 
 class _KeepAliveHTTPHandler(urllib.request.HTTPHandler):

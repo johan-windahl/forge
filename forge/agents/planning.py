@@ -74,15 +74,21 @@ def _draft_source_evidence(ctx: AgentContext, draft: dict[str, Any]) -> dict[str
     evidence: dict[str, str] = {}
     remaining_chars = 48_000
     for relative in candidates[:16]:
-        path = (ctx.root / relative).resolve()
+        absolute = (ctx.root / relative).resolve()
         try:
-            path.relative_to(ctx.root.resolve())
+            absolute.relative_to(ctx.root.resolve())
         except ValueError:
             continue
-        if not path.is_file() or path.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".mp4"}:
+        if not absolute.is_file() or absolute.suffix.lower() in {
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".gif",
+            ".mp4",
+        }:
             continue
         try:
-            content = path.read_text(encoding="utf-8")
+            content = absolute.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
         if remaining_chars <= 0:

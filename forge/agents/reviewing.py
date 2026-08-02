@@ -271,10 +271,13 @@ def _whole_review_paths(root: Path, *, limit: int = 80) -> list[str]:
     for path in preferred:
         if path.suffix.lower() not in allowed:
             continue
-        relative = path.relative_to(root)
-        if any(part in {"node_modules", ".git", "dist", "build", ".forge"} for part in relative.parts):
+        relative_path = path.relative_to(root)
+        if any(
+            part in {"node_modules", ".git", "dist", "build", ".forge"}
+            for part in relative_path.parts
+        ):
             continue
-        value = relative.as_posix()
+        value = relative_path.as_posix()
         if value in seen:
             continue
         seen.add(value)

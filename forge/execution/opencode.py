@@ -408,15 +408,20 @@ class OpenCodeExecutor:
                 continue
             session_id = str(event.get("sessionID") or session_id)
             kind = str(event.get("type") or "")
-            part = event.get("part") if isinstance(event.get("part"), dict) else {}
+            # Bind before narrowing: mypy cannot narrow a `.get()` call result,
+            # only a name.
+            raw_part = event.get("part")
+            part: dict[Any, Any] = raw_part if isinstance(raw_part, dict) else {}
 
             if kind == "text":
                 text = event.get("text") or part.get("text")
                 if text:
                     texts.append(str(text))
             elif kind == "step_finish":
-                tokens = part.get("tokens") if isinstance(part.get("tokens"), dict) else {}
-                cache = tokens.get("cache") if isinstance(tokens.get("cache"), dict) else {}
+                raw_tokens = part.get("tokens")
+                tokens: dict[Any, Any] = raw_tokens if isinstance(raw_tokens, dict) else {}
+                raw_cache = tokens.get("cache")
+                cache: dict[Any, Any] = raw_cache if isinstance(raw_cache, dict) else {}
                 usage.input_tokens += _integer(tokens.get("input"))
                 usage.output_tokens += _integer(tokens.get("output"))
                 usage.reasoning_tokens += _integer(tokens.get("reasoning"))
