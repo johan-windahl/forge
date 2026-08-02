@@ -375,33 +375,50 @@ def reference_images_described(root: Path, *, limit: int = 6) -> list[tuple[Path
     "this is what we are replacing", and a model shown the bare file has to
     guess which -- differently each time it is asked.
 
-    A declared manifest wins over the filename heuristic below, because a
-    declaration cannot be wrong about its own role and a substring match can.
+    A declaration wins over the filename heuristic, because a declaration cannot
+    be wrong about its own role and a substring match can. It does not win over
+    the *ordering* rule: a declared reference still sorts behind primary material
+    if it is derived, and an undeclared file dropped into the folder by hand is
+    still ranked by name. Skipping the rank for declared entries would put us
+    straight back where a manifest containing a hand-dropped
+    `nightmare-audio-spectrogram.png` displaces the artwork it came from.
     """
     suffixes = {".png", ".jpg", ".jpeg", ".webp"}
     forge_dir = root.parent / ".forge"
 
-    described: list[tuple[Path, str]] = []
-    seen: set[Path] = set()
     store = ReferenceStore(forge_dir)
-    if store.manifest_path.is_file():
-        for ref in store.load():
-            path = store.path_of(ref)
-            if ref.role == "visual" and path.is_file() and path.suffix.lower() in suffixes:
-                described.append((path, ref.description))
-                seen.add(path)
+    declared = {store.path_of(ref): ref for ref in store.declared()}
 
-    found: list[Path] = []
+    #: (tier, name): primary declared, then unknown, then anything derived.
+    ranked: list[tuple[tuple[int, str], Path, str]] = []
+    seen: set[Path] = set()
+
+    def consider(path: Path) -> None:
+        if path in seen or not path.is_file() or path.suffix.lower() not in suffixes:
+            return
+        seen.add(path)
+        ref = declared.get(path)
+        if ref is None:
+            derived, name = _reference_rank(path)
+            ranked.append(((2 if derived else 1, name), path, ""))
+            return
+        # An operator who marked a picture `document`, `example` or `other` has
+        # excluded it from visual comparison on purpose -- often because it is
+        # the thing being replaced. Honour that instead of letting the directory
+        # scan hand it to the vision model anyway, stripped of its warning.
+        if ref.role != "visual":
+            return
+        ranked.append(((2 if ref.is_derived else 0, ref.file.lower()), path, ref.description))
+
+    for path in sorted(declared):
+        consider(path)
     for directory in (root / "docs" / "references", forge_dir / "references"):
-        if not directory.is_dir():
-            continue
-        found.extend(
-            path
-            for path in directory.rglob("*")
-            if path.is_file() and path.suffix.lower() in suffixes and path not in seen
-        )
-    described.extend((path, "") for path in sorted(found, key=_reference_rank))
-    return described[:limit]
+        if directory.is_dir():
+            for path in sorted(directory.rglob("*")):
+                consider(path)
+
+    ranked.sort(key=lambda item: item[0])
+    return [(path, description) for _, path, description in ranked[:limit]]
 
 
 def file_tree(root: Path, *, limit: int = 400, exclude: set[str] | None = None) -> str:

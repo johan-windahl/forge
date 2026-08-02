@@ -140,6 +140,132 @@ def test_non_visual_references_are_not_sent_to_the_vision_model(store, tmp_path)
     assert reference_images_described(workspace) == []
 
 
+def test_a_manifest_does_not_let_diagnostics_displace_the_artwork(store, tmp_path) -> None:
+    """The bug the derived-name heuristic exists to stop, via the manifest.
+
+    Declared entries used to bypass `_reference_rank` entirely, so once a
+    manifest existed the whole folder -- declared and hand-dropped alike -- was
+    emitted alphabetically. Four supporting diagnostics sort ahead of `table.png`
+    and, at the default limit, the actual reference never reaches the model.
+    """
+    from forge.memory.context import reference_images_described
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store.add(str(_file(tmp_path, "table.png", b"the target")), description="the target")
+    for name in (
+        "aaa-contact-sheet.png",
+        "bb-diff.png",
+        "cc-thumbnail.png",
+        "nightmare-audio-spectrogram.png",
+    ):
+        (store.root / name).write_bytes(name.encode())
+
+    described = reference_images_described(workspace, limit=4)
+
+    assert described[0] == (store.root / "table.png", "the target")
+    assert [p.name for p, _ in described[1:]] == [
+        "aaa-contact-sheet.png",
+        "bb-diff.png",
+        "cc-thumbnail.png",
+    ]
+
+
+def test_undeclared_forge_files_do_not_outrank_references_versioned_in_the_repo(
+    store, tmp_path
+) -> None:
+    """Neither directory is privileged; only declaration and derivation rank.
+
+    Existing of a manifest used to make every file in `.forge/references` sort
+    ahead of everything in `docs/references`, including files nobody had
+    declared, so a project that versions its references lost them all.
+    """
+    from forge.memory.context import reference_images_described
+
+    workspace = tmp_path / "workspace"
+    versioned = workspace / "docs" / "references"
+    versioned.mkdir(parents=True)
+    (versioned / "b-target.png").write_bytes(b"versioned target")
+    store.add(str(_file(tmp_path, "declared.png", b"declared")), description="the brief")
+    for name in ("a-thumbnail.png", "c-scratch.png"):
+        (store.root / name).write_bytes(name.encode())
+
+    described = reference_images_described(workspace, limit=3)
+
+    assert [p.name for p, _ in described] == [
+        "declared.png",  # declared, so it leads
+        "b-target.png",  # then plain alphabetical across both directories
+        "c-scratch.png",  # `a-thumbnail.png` is a derived diagnostic, so it sinks
+    ]
+
+
+def test_an_excluded_image_is_not_smuggled_back_in_by_the_directory_scan(store, tmp_path) -> None:
+    """A role that is not `visual` means "do not compare against this".
+
+    Skipping such an entry without marking it seen left the directory scan free
+    to pick the same file up again -- stripped of the description that said it
+    was the design being replaced.
+    """
+    from forge.memory.context import reference_images_described
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store.add(
+        str(_file(tmp_path, "old-design.png", b"png")),
+        description="this is what we are REPLACING",
+        role="other",
+    )
+
+    assert reference_images_described(workspace) == []
+
+
+def test_adding_a_file_already_dropped_in_by_hand_does_not_duplicate_it(store, tmp_path) -> None:
+    """Dedup has to see entries the directory scan synthesised, which carry no hash."""
+    store.root.mkdir(parents=True)
+    (store.root / "mockup.png").write_bytes(b"the same bytes")
+
+    ref = store.add(str(_file(tmp_path, "mockup.png", b"the same bytes")), description="target layout")
+
+    assert [r.file for r in store.load()] == ["mockup.png"]
+    assert ref.description == "target layout"
+    assert ref.sha256, "adoption into the manifest is where the hash gets recorded"
+
+
+def test_re_adding_applies_the_corrected_role(store, tmp_path) -> None:
+    """Re-adding is how an operator fixes a reference; a silent no-op lies about it."""
+    origin = _file(tmp_path, "diagram.png", b"png")
+    store.add(str(origin), description="the layout")
+
+    ref = store.add(str(origin), role="document", derived_from="spec.md")
+
+    assert (ref.role, ref.derived_from) == ("document", "spec.md")
+    assert ref.description == "the layout", "an omitted description must not erase the old one"
+
+
+def test_a_web_page_served_as_an_image_is_refused(store, tmp_path, monkeypatch) -> None:
+    """A soft 404 stored once is compared against for the life of the project."""
+    import io
+    from email.message import Message
+
+    class FakeResponse(io.BytesIO):
+        headers = Message()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    response = FakeResponse(b"<html>Sign in to continue</html>")
+    response.headers["Content-Type"] = "text/html; charset=utf-8"
+    monkeypatch.setattr("urllib.request.urlopen", lambda *a, **kw: response)
+
+    with pytest.raises(ReferenceError):
+        store.add("https://example.test/mockup.png", description="target layout")
+
+    assert not (store.root / "mockup.png").exists()
+
+
 # --------------------------------------------------------------------------
 # The init prompt flow
 # --------------------------------------------------------------------------
@@ -178,6 +304,23 @@ def test_the_prompt_survives_being_interrupted(monkeypatch) -> None:
     monkeypatch.setattr("builtins.input", fake_input)
 
     assert cli._ask_references() == [("https://example.test/a.png", "a note")]
+
+
+def test_interrupting_at_the_description_keeps_the_source(monkeypatch) -> None:
+    """Discarding the line just typed reads as the prompt having ignored it."""
+    from forge import cli
+
+    answers = iter(["https://example.test/a.png"])
+
+    def fake_input(*a):
+        try:
+            return next(answers)
+        except StopIteration:
+            raise KeyboardInterrupt from None
+
+    monkeypatch.setattr("builtins.input", fake_input)
+
+    assert cli._ask_references() == [("https://example.test/a.png", "")]
 
 
 @pytest.mark.parametrize(

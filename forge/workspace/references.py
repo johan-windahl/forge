@@ -151,6 +151,18 @@ class ReferenceStore:
         declared.sort(key=lambda ref: (ref.is_derived, ref.file))
         return declared
 
+    def declared(self) -> list[Reference]:
+        """Only what the manifest actually says, without the directory scan.
+
+        `load()` deliberately blends in hand-dropped files so nothing is lost.
+        Callers that treat a declaration as authoritative -- "this role was
+        chosen by a human" -- need the narrower set, because a synthesised entry
+        carries a *guessed* role and no description at all.
+        """
+        refs = self._load_manifest()
+        refs.sort(key=lambda ref: (ref.is_derived, ref.file))
+        return refs
+
     def by_role(self, *roles: str) -> list[Reference]:
         wanted = set(roles)
         return [ref for ref in self.load() if ref.role in wanted]
@@ -209,13 +221,19 @@ class ReferenceStore:
             source = str(origin.resolve())
 
         digest = file_hash(target)
-        existing = next((r for r in self.load() if r.sha256 and r.sha256 == digest), None)
-        if existing and existing.file != target.name:
+        existing = self._match_digest(digest, skip=target.name)
+        if existing is not None:
             target.unlink(missing_ok=True)
-            existing.description = description or existing.description
-            self._save(
-                [existing if r.file == existing.file else r for r in self.load()]
-            )
+            # Re-adding is how an operator corrects a reference, so everything
+            # they supplied this time has to land. Carrying only the description
+            # made `--role` silently inert on material already in the store,
+            # while still reporting success.
+            existing.description = description.strip() or existing.description
+            existing.role = role or existing.role
+            existing.derived_from = derived_from or existing.derived_from
+            existing.source = existing.source or source
+            existing.sha256 = existing.sha256 or digest
+            self._save([existing if r.file == existing.file else r for r in self.load()])
             return existing
 
         ref = Reference(
@@ -231,6 +249,22 @@ class ReferenceStore:
         self._save([r for r in self.load() if r.file != ref.file] + [ref])
         return ref
 
+    def _match_digest(self, digest: str, *, skip: str) -> Reference | None:
+        """Find already-stored bytes, hashing on demand where needed.
+
+        Entries synthesised by the directory scan have no recorded hash, so a
+        plain manifest comparison misses them and `forge reference add` on a file
+        the operator had already dropped in produced a second copy -- one with
+        their description, one without, both sent to the same comparison.
+        """
+        for ref in self.load():
+            if ref.file == skip:
+                continue
+            known = ref.sha256 or _hash_or_empty(self.path_of(ref))
+            if known and known == digest:
+                return ref
+        return None
+
     def _free_path(self, name: str) -> Path:
         target = self.root / name
         if not target.exists():
@@ -244,6 +278,14 @@ class ReferenceStore:
 
     def _save(self, refs: list[Reference]) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
+        # Adopting a hand-dropped file into the manifest is the moment to record
+        # what it is. Writing the synthesised entry through unchanged would make
+        # the missing hash permanent, and dedup depends on it.
+        for ref in refs:
+            if not ref.sha256:
+                ref.sha256 = _hash_or_empty(self.path_of(ref))
+            if not ref.bytes:
+                ref.bytes = _size(self.path_of(ref))
         refs.sort(key=lambda ref: (ref.is_derived, ref.file))
         payload = {
             "version": MANIFEST_VERSION,
@@ -261,16 +303,43 @@ def _size(path: Path) -> int:
         return 0
 
 
+def _hash_or_empty(path: Path) -> str:
+    try:
+        return file_hash(path)
+    except OSError:
+        return ""
+
+
+#: Content types that mean "you did not get the file you asked for" when the
+#: thing requested was a picture, a clip or a sound: a soft 404, a login wall or
+#: a consent interstitial, all served with status 200.
+_MARKUP_TYPES = ("text/html", "application/xhtml")
+
+
 def _download(url: str, target: Path) -> None:
     """Fetch a reference once, refusing anything implausibly large.
 
     Streamed and size-checked while reading rather than trusting
     ``Content-Length``: a server that lies about the length would otherwise
     write it to disk anyway.
+
+    The content type is checked too, because a reference is fetched once and
+    then compared against for the life of the project. An error page served with
+    status 200 under an ``.png`` URL would be stored, typed `visual` from its
+    suffix, base64-encoded as an image and sent to the vision model on every
+    goal check -- failing, if at all, as an unrelated provider error days later.
     """
     request = urllib.request.Request(url, headers={"User-Agent": "forge/reference-fetch"})
     try:
         with urllib.request.urlopen(request, timeout=FETCH_TIMEOUT) as response:
+            content_type = (response.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+            wanted = infer_role(target.name)
+            if wanted in {"visual", "motion", "audio"} and content_type.startswith(_MARKUP_TYPES):
+                raise ReferenceError(
+                    "reference is a web page, not the file it claims to be",
+                    url=url,
+                    content_type=content_type,
+                )
             declared = response.headers.get("Content-Length")
             if declared and declared.isdigit() and int(declared) > MAX_BYTES:
                 raise ReferenceError(

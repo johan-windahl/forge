@@ -127,6 +127,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     interactive = _can_prompt(args)
 
     goal = " ".join(args.goal or []).strip()
+    goal_given = bool(goal)
     if not goal and interactive:
         goal = _ask_goal()
     if not goal:
@@ -139,7 +140,11 @@ def cmd_init(args: argparse.Namespace) -> int:
 
     store = ReferenceStore(config.forge_dir)
     pending = [_split_reference(raw) for raw in (args.reference or [])]
-    if interactive and not pending:
+    # Only the conversation asks follow-up questions. `forge init "<goal>"` is
+    # the documented one-liner in the README and every example; making it stop
+    # at an unexplained `reference>` prompt would break each of them, and the
+    # tip printed below covers the same ground without blocking.
+    if interactive and not pending and not goal_given:
         pending = _ask_references()
 
     added = []
@@ -202,11 +207,18 @@ def _ask_references() -> list[tuple[str, str]]:
     while True:
         try:
             source = input("reference> ").strip()
-            if not source:
-                return out
-            description = input("  what should Forge take from it? ").strip()
         except (EOFError, KeyboardInterrupt):
             print()
+            return out
+        if not source:
+            return out
+        try:
+            description = input("  what should Forge take from it? ").strip()
+        except (EOFError, KeyboardInterrupt):
+            # Keep the source. Interrupting at the second question discarded the
+            # line just typed, which reads as the whole prompt having ignored it.
+            print()
+            out.append((source, ""))
             return out
         out.append((source, description))
 
@@ -236,16 +248,20 @@ def cmd_reference(args: argparse.Namespace) -> int:
         return 0
 
     added = []
+    failed = False
     for raw in args.source:
         source, inline = _split_reference(raw)
         try:
             added.append(store.add(source, description=args.describe or inline, role=args.role or ""))
         except ReferenceError as exc:
-            print(f"error: {exc.message}", file=sys.stderr)
-            return 1
+            print(f"error: {source}: {exc.message}", file=sys.stderr)
+            failed = True
+    # Report what landed even on failure: earlier sources are already copied in
+    # and written to the manifest, and returning on the first error left the
+    # operator with a changed store and no idea it had changed.
     for ref in added:
         print(f"Added [{ref.role}] {ref.label()}")
-    return 0
+    return 1 if failed else 0
 
 
 def cmd_run(args: argparse.Namespace) -> int:
