@@ -50,6 +50,7 @@ from ..memory.lessons import LessonLibrary
 from ..memory.records import MemoryKind
 from ..memory.store import MemoryStore, requirement
 from ..models.client import ModelClient
+from ..models.health import probe_provider
 from ..obs.log import get_logger
 from ..obs.metrics import Metrics
 from ..util.clock import Clock, default_clock, human_duration
@@ -165,6 +166,9 @@ class Orchestrator:
         #: Per-model (calls, in, out, cost) at the last usage report, so each
         #: report can show the window rather than only the running total.
         self._usage_mark: dict[str, tuple[int, int, int, float]] = {}
+        #: Latched so an unreachable endpoint is reported once per outage rather
+        #: than once per heartbeat.
+        self._endpoint_unreachable = False
         self._digest: str = ""
         self._digest_version = -1
         self.stats = RunStats()
@@ -574,7 +578,10 @@ class Orchestrator:
         active = [d for d in deltas if d["calls"]]
         if not active:
             log.info("usage: no model calls in the last window")
+            self._check_silent_window(run_id)
             return
+        # Calls landed, so whatever was serving them is reachable by definition.
+        self._clear_endpoint_warning(run_id, "model calls resumed")
         for entry in active:
             log.info(
                 "usage",
@@ -586,6 +593,75 @@ class Orchestrator:
                 cost=entry["cost"],
                 total_out=entry["total_output_tokens"],
             )
+
+    def _check_silent_window(self, run_id: str) -> None:
+        """Explain a quiet usage window when a node is supposed to be working.
+
+        A window with no model calls is normal when nothing is running. With a
+        node running it is not: either the model is mid-generation, or the run is
+        blocked on an endpoint that will never answer. The two look identical
+        from here, so ask the endpoint directly.
+
+        This exists because an unreachable local server is silent by nature. The
+        inner executor blocks on its socket, the node keeps its lease, and the
+        heartbeat keeps reporting "no model calls" without ever saying why. One
+        run sat that way for close to two hours after its base URL changed under
+        it. The probe is free; the silence was not.
+        """
+        if not self.graph.counts().get(NodeStatus.RUNNING, 0):
+            self._endpoint_unreachable = False
+            return
+
+        provider = self.config.models.providers.get("local")
+        if provider is None or provider.kind not in {"openai_compat", "openai", "anthropic"}:
+            return
+
+        reachable, detail = probe_provider(provider)
+        if reachable:
+            self._clear_endpoint_warning(run_id, detail)
+            return
+
+        # Log the transition loudly, then stay quiet: the heartbeat runs every
+        # few minutes and a repeating error teaches an operator to ignore it.
+        # The *event* is emitted every window regardless -- the ledger is state,
+        # not a log, and `forge status` reads the newest one to decide whether
+        # the outage is still current.
+        if not self._endpoint_unreachable:
+            log.error(
+                "local model endpoint unreachable while a node is running",
+                detail=detail,
+                hint="check the server, or set [models.providers.local].base_url "
+                "(or FORGE_LOCAL_BASE_URL)",
+            )
+        self.ledger.emit(
+            EventType.RUN_WARNING,
+            run_id=run_id,
+            kind="model_endpoint_unreachable",
+            provider="local",
+            detail=detail,
+            resolved=False,
+        )
+        self._endpoint_unreachable = True
+
+    def _clear_endpoint_warning(self, run_id: str, detail: str = "") -> None:
+        """Record that the endpoint is answering again.
+
+        Emitted rather than inferred. Letting recovery be implied by "some other
+        event was written afterwards" makes whether the stall still shows depend
+        on write ordering elsewhere in the heartbeat.
+        """
+        if not self._endpoint_unreachable:
+            return
+        log.info("local model endpoint is answering again", detail=detail)
+        self.ledger.emit(
+            EventType.RUN_WARNING,
+            run_id=run_id,
+            kind="model_endpoint_unreachable",
+            provider="local",
+            detail=detail,
+            resolved=True,
+        )
+        self._endpoint_unreachable = False
 
     def _idle_now(self) -> bool:
         """One sample of "nothing to do and nothing coming".
@@ -1493,7 +1569,22 @@ class Orchestrator:
             "stub_runs": self._stub_run_count(),
             "quiet_for": self._quiet_for(),
             "quiet_threshold": self._quiet_threshold(),
+            "warning": self._latest_warning(),
         }
+
+    def _latest_warning(self) -> dict[str, Any] | None:
+        """The most recent unresolved environmental warning, if any.
+
+        Only warnings newer than the last usage report matter: an endpoint that
+        answered since is no longer the explanation for anything.
+        """
+        events = self.ledger.tail(1, types=[EventType.RUN_WARNING])
+        if not events:
+            return None
+        payload = events[-1].payload
+        if payload.get("resolved"):
+            return None
+        return {"kind": payload.get("kind", ""), "detail": payload.get("detail", "")}
 
     def _quiet_threshold(self) -> float:
         """How long silence has to last before it means something is wrong.

@@ -1407,3 +1407,88 @@ def test_a_drained_project_with_nothing_open_stays_finished(
     orchestrator._reopen_if_unfinished()
 
     assert not [n for n in orchestrator.graph.all_nodes() if n.spec.get("reopened")]
+
+
+# --------------------------------------------------------------------------
+# Environmental failure: an endpoint that stops answering
+# --------------------------------------------------------------------------
+
+
+def _running_node(orchestrator: Orchestrator) -> None:
+    """Put one node into RUNNING so a silent window is suspicious.
+
+    The shared fixture makes every provider an echo stub; a stub has no endpoint
+    to probe, so this scenario needs the local one to look like real HTTP.
+    """
+    orchestrator.config.models.providers["local"].kind = "openai_compat"
+    _project(orchestrator)
+    node = orchestrator.graph.add_node(
+        kind="implement", title="something long-running", spec={}
+    )
+    orchestrator.graph.start(node.id, tier="local", worker_id="test-worker")
+
+
+def test_a_silent_window_with_a_running_node_probes_the_endpoint(
+    orchestrator: Orchestrator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The failure this exists for: the server went away and nothing said so.
+
+    A run whose model endpoint stops answering does not fail, it waits. The
+    executor blocks on its socket and the only symptom is a usage report with
+    no calls in it -- which is also what a model mid-generation looks like.
+    """
+    from forge.kernel import orchestrator as orch_module
+
+    _running_node(orchestrator)
+    monkeypatch.setattr(
+        orch_module, "probe_provider", lambda provider, **kw: (False, "http://nope/v1 unreachable")
+    )
+
+    orchestrator._check_silent_window("run-1")
+
+    warning = orchestrator._latest_warning()
+    assert warning is not None
+    assert warning["kind"] == "model_endpoint_unreachable"
+    assert "unreachable" in warning["detail"]
+
+
+def test_a_silent_window_with_nothing_running_is_not_an_error(
+    orchestrator: Orchestrator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Idle is not broken. Probing here would cry wolf on every quiet project."""
+    from forge.kernel import orchestrator as orch_module
+
+    orchestrator.config.models.providers["local"].kind = "openai_compat"
+    _project(orchestrator)
+    called = []
+    monkeypatch.setattr(
+        orch_module,
+        "probe_provider",
+        lambda provider, **kw: called.append(1) or (False, "unreachable"),
+    )
+
+    orchestrator._check_silent_window("run-1")
+
+    assert not called
+    assert orchestrator._latest_warning() is None
+
+
+def test_the_warning_clears_once_the_endpoint_answers_again(
+    orchestrator: Orchestrator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A recovered endpoint must stop explaining a stall that no longer exists."""
+    from forge.kernel import orchestrator as orch_module
+
+    _running_node(orchestrator)
+    monkeypatch.setattr(
+        orch_module, "probe_provider", lambda provider, **kw: (False, "unreachable")
+    )
+    orchestrator._check_silent_window("run-1")
+    assert orchestrator._latest_warning() is not None
+
+    monkeypatch.setattr(
+        orch_module, "probe_provider", lambda provider, **kw: (True, "responded 200")
+    )
+    orchestrator._check_silent_window("run-1")
+
+    assert orchestrator._latest_warning() is None

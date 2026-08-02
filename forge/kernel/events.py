@@ -35,6 +35,10 @@ class EventType:
     RUN_STARTED = "run.started"
     RUN_STOPPED = "run.stopped"
     RUN_HEARTBEAT = "run.heartbeat"
+    #: An environmental problem the run cannot fix and did not cause: an
+    #: unreachable model endpoint, a vanished toolchain. Recorded so `forge
+    #: status` can explain a stall instead of only reporting one.
+    RUN_WARNING = "run.warning"
     USAGE_REPORT = "usage.report"
 
     # -- planning

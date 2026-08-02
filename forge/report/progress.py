@@ -70,7 +70,16 @@ def render_status(status: dict[str, Any], *, verbose: bool = False) -> str:
     quiet = float(status.get("quiet_for", 0.0))
     # The run knows its own slowest rung; fall back only when it did not say.
     threshold = float(status.get("quiet_threshold") or _QUIET_WARNING)
-    if quiet >= threshold:
+    warning = status.get("warning") or {}
+    if warning.get("kind") == "model_endpoint_unreachable":
+        # A named cause beats "a node may be stuck": this one is the operator's
+        # to fix, and nothing the run does will resolve it.
+        lines.append(f"          ^ MODEL ENDPOINT UNREACHABLE -- {warning.get('detail', '')}")
+        lines.append(
+            "            the run cannot progress until it answers "
+            "(forge doctor, forge stop)"
+        )
+    elif quiet >= threshold:
         # A wedged worker keeps the heartbeat going and the counts unchanged, so
         # without this the display is identical to healthy work.
         lines.append(

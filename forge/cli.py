@@ -1343,20 +1343,9 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 def _probe_local(config: Config) -> tuple[bool, str]:
     """Check the local model endpoint answers, without spending anything."""
-    import urllib.error
-    import urllib.request
+    from .models.health import probe_local
 
-    provider = config.models.providers.get("local")
-    if provider is None:
-        return False, "no local provider configured"
-    url = provider.base_url.rstrip("/") + "/models"
-    try:
-        with urllib.request.urlopen(url, timeout=5) as response:
-            return 200 <= response.status < 500, f"{provider.base_url} responded {response.status}"
-    except urllib.error.HTTPError as exc:
-        return True, f"{provider.base_url} responded {exc.code}"
-    except Exception as exc:
-        return False, f"{provider.base_url} unreachable: {exc}"
+    return probe_local(config)
 
 
 # --------------------------------------------------------------------------
