@@ -60,7 +60,7 @@ model reasoning with a lint rule or a gate.
 Requires Python 3.12+ and git. **The core has no third-party dependencies.**
 
 ```bash
-git clone https://github.com/USERNAME/forge.git && cd forge
+git clone https://github.com/johan-windahl/forge.git && cd forge
 pip install -e .
 
 # Optional: browser and visual verification
