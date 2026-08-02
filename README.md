@@ -1,9 +1,11 @@
 # Forge
 
-An autonomous software engineering platform. You give it one sentence describing
-what you want built. It plans, implements, tests, drives a browser, reviews its
-own work, deploys, and improves its own workflow — unattended, for days, across
-crashes.
+An autonomous software engineering platform that runs on **your own hardware**,
+and reaches for a frontier model only when your own model is not good enough.
+
+You give it one sentence describing what you want built. It plans, implements,
+tests, drives a browser, reviews its own work, deploys, and improves its own
+workflow — unattended, for days, across crashes.
 
 ```bash
 forge init "Build a browser-based Quake-inspired FPS with one polished level."
@@ -13,6 +15,43 @@ forge run
 That is the whole interface. Everything else — the architecture, the milestones,
 the test strategy, which model handles which task — Forge decides and writes
 down.
+
+## The point
+
+A self-hosted model can do most of the work in a software project. Extraction,
+classification, summarising, routine implementation, the tenth near-identical
+test file: none of it needs a frontier model, and paying frontier prices for it
+is how autonomous agents become too expensive to leave running.
+
+What a local model *cannot* reliably do is the hard fraction. A subtle
+concurrency bug, an architecture that has to hold for three more milestones, a
+failure it has already misdiagnosed twice.
+
+So Forge treats your own model as the default and a stronger model as a scarce
+resource it has to justify spending:
+
+- **Local first, always.** Every task starts on the local rung. The ladder is
+  walked upward only on failure, and the first step up is free: `local` and
+  `local_deep` are the same weights with chain-of-thought switched on.
+- **Escalation is earned, not requested.** A request declares what *kind* of
+  task it is, never which model it wants. The router keeps a per-(task class,
+  rung) success posterior fed by real gate outcomes and picks the cheapest rung
+  likely to succeed.
+- **The cloud share is a governed budget.** Forge measures the fraction of
+  generated tokens served by non-local models against a target (20% by default)
+  and a hard ceiling (60%). Projected calls that would cross the ceiling are
+  rejected before they are made, and running above target raises the bar for
+  every further escalation.
+- **Borrow judgement, not labour.** The common escalation is not "let the big
+  model write it". It is a short, expensive diagnosis fed back into a cheap
+  local repair: local fast, local deep, local decomposition, cloud diagnosis,
+  local repair with that advice, and only then direct cloud implementation.
+- **Everything learned is kept.** Outcomes become lessons and conventions that
+  persist across projects, so work that needed escalation once tends not to need
+  it again.
+
+Run with no subscription at all and the ladder is simply shorter. Forge adapts
+to whatever is reachable rather than refusing to start.
 
 > **Forge runs model-generated commands on your machine.** The default sandbox
 > is `kind = "local"`, so builds, tests and tooling execute directly on the host
@@ -104,20 +143,14 @@ or `[models.providers.local].base_url` in `.forge/config.toml`; a box on your ow
 private network works as well as localhost. The server needs no authentication,
 so do not expose it to the public internet. `forge doctor` probes it live.
 
-The first escalation is free: `local` and `local_deep` are the same model, and
-the difference is whether chain-of-thought is enabled. On this model that is a
-real capability jump — 19 output tokens versus 691 on the same trivial request —
-so a failing node gets a genuinely stronger attempt before anything touches a
-subscription.
+The free first escalation is worth measuring on your own weights: on this model,
+one trivial structured request produced 19 output tokens with thinking off and
+691 with it on, and returned nothing at all when capped at 200 — the same
+capability jump that lets a failing node get a genuinely stronger attempt before
+anything touches a subscription.
 
-Forge runs with whatever is reachable. No subscription means a shorter ladder
-and a router that adapts, not a refusal to start.
-
-For code-writing work the ladder is a workflow, not permission to hand the
-whole task upward immediately: local fast, local deep, local decomposition,
-short cloud diagnosis, local repair with that advice, and only then direct
-cloud implementation. Mutating nodes run in persistent per-node git worktrees;
-only merged results that pass the gates on the integrated tree reach `main`.
+Mutating nodes run in persistent per-node git worktrees; only merged results
+that pass the gates on the integrated tree reach `main`.
 
 When OpenCode is installed, Forge uses it as the inner executor for compatible
 local coding rungs: OpenCode explores the repository, edits files, runs focused

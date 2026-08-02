@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "forge"
 version = "0.1.0"
-description = "Forge - an autonomous software engineering platform"
+description = "An autonomous software engineering platform that runs on your own hardware, escalating to a frontier model only when the local one is not good enough"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
