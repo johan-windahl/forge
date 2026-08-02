@@ -1,0 +1,47 @@
+# A browser application, where "it compiles" says almost nothing.
+#
+# The point of this configuration is that a web app's real failure mode is a
+# blank white page: it builds, its unit tests pass, and it renders nothing. Only
+# a real browser catches that.
+
+[validation]
+gates = [
+  "schema", "secrets", "lint", "types", "build", "unit",
+  "browser",      # does it load without console errors or a blank page
+  "smoke",        # does a scripted user flow complete
+  "visual",       # has the rendering changed since the approved baseline
+  "bundle_size",
+  "load_perf",
+]
+parallel = 4
+browser_headless = true
+browser_timeout = 90
+# Fraction of pixels allowed to differ before a change is reported. 0.5% suits a
+# static UI; raise it toward 2% for canvas or 3D rendering, where lighting and
+# anti-aliasing make identical scenes differ slightly.
+visual_tolerance = 0.005
+
+[validation.gate_settings.browser]
+routes = ["/", "/about"]
+settle_ms = 2500
+
+[validation.gate_settings.bundle_size]
+budget_kb = 500
+
+[validation.gate_settings.load_perf]
+budget_ms = 2500
+runs = 3                    # median of three; one cold start should not decide
+
+[budget]
+total_cost = 120.0
+# Visual review is the only vision-model spend, and it runs only when the pixel
+# comparison reports a change -- so this stays achievable.
+cloud_fraction_target = 0.12
+
+[deploy]
+enabled = true
+strategy = "static"
+command = "npm run build"
+healthcheck_url = "http://127.0.0.1:8080/"
+healthcheck_timeout = 120
+rollback_on_failure = true

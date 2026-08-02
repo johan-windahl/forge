@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+build/
+dist/
+.venv/
+venv/
+
+# Tooling caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage/
+htmlcov/
+
+# Forge run state: ledgers, worktrees, artifacts and logs are per-host
+.forge/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/

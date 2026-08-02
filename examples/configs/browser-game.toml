@@ -1,0 +1,93 @@
+# A canvas/WebGL browser game.
+#
+# Games are the hardest thing to verify autonomously, because the thing that
+# matters most -- how it feels -- has no gate. This configuration puts as much
+# of "polished" as possible under deterministic measurement (it loads, it holds
+# frame rate, it renders, the flow completes) so that model judgement is left
+# only with the genuinely subjective part.
+
+log_level = "info"
+
+[scheduler]
+# The local server has 4 slots; 2 workers leaves headroom for the browser gates,
+# which are serialised anyway because they bind ports.
+workers = 2
+# Asset pipelines and headless Chromium runs are slow. A lease shorter than the
+# slowest node gets the node stolen mid-work.
+lease_seconds = 2400
+max_attempts = 4
+
+[sandbox]
+# Local, not docker: Playwright needs its browser and system libraries, and
+# putting them inside the container is a separate piece of work. Revisit if the
+# project starts pulling untrusted dependencies.
+kind = "local"
+command_timeout = 1200
+
+[budget]
+total_cost = 250.0
+daily_cost = 60.0
+per_node_cost = 8.0
+# Games need more frontier help than a CRUD app: physics tuning and visual
+# judgement are exactly where the local model is weakest.
+cloud_fraction_target = 0.18
+escalation_reserve = 0.30
+
+[validation]
+gates = [
+  "schema", "secrets", "lint", "types", "build", "unit",
+  "browser",      # does it boot without console errors or a blank canvas
+  "smoke",        # does a scripted play session complete
+  "visual",       # has the rendering changed since the approved baseline
+  "bundle_size",
+  "load_perf",
+]
+parallel = 4
+browser_headless = true
+browser_timeout = 120
+
+# A moving game canvas never produces two identical screenshots, so ordinary
+# pixel comparison is meaningless here. Two things make it useful again:
+#   1. a high tolerance, so incidental motion does not trip it;
+#   2. a deterministic screenshot route in the game itself (see the goal text),
+#      which renders one fixed frame with the simulation paused.
+# Without (2), treat the visual gate as a change *detector* feeding the visual
+# review agent, not as a regression test.
+visual_tolerance = 0.06
+
+[validation.gate_settings.browser]
+routes = ["/", "/?screenshot=1"]
+settle_ms = 3500
+
+[validation.gate_settings.load_perf]
+# A game that takes five seconds to start is not polished, whatever it looks
+# like. This is the one component of "feel" that is objectively measurable.
+budget_ms = 2500
+runs = 3
+
+[validation.gate_settings.bundle_size]
+budget_kb = 1500
+
+# Frame rate as a hard gate. Enable once the game exposes a headless benchmark.
+# The contract is one line on stdout: `FORGE_METRIC <name> <value>`.
+#
+# [validation.gate_settings.benchmark]
+# command = "npm run bench:fps"
+# budgets = { frame_time_ms = 16.7, worst_frame_ms = 33.0 }
+
+[memory]
+# Games accumulate a lot of interface surface (entities, systems, table data),
+# and an implementer that cannot see the contracts invents parallel ones.
+max_context_tokens = 28000
+retrieval_limit = 16
+
+[improvement]
+retrospective_after_milestone = true
+promote_findings_after = 3
+
+[deploy]
+# A browser game is a static bundle, so deployment is cheap and worth having:
+# it forces the build to actually produce something servable.
+enabled = true
+strategy = "static"
+healthcheck_timeout = 120

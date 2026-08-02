@@ -1,0 +1,68 @@
+# A long, unattended run on a machine you care about.
+#
+# Priorities, in order: do not damage the host, do not overspend, do not stop
+# for anything recoverable, and leave enough evidence to reconstruct what
+# happened afterwards.
+
+log_level = "info"
+
+[sandbox]
+# One container per command. Slower by a couple of hundred milliseconds and
+# worth every one of them: the environment on day forty matches day one.
+kind = "docker"
+image = "forge/workbench:latest"
+cpus = 6.0
+memory = "8g"
+command_timeout = 1800
+allow_network = true        # set false if the project needs no package installs
+
+[coding]
+# Install OpenCode in the workbench image. Forge gives it only the local model
+# and the current node worktree; cloud routing and commits remain outside it.
+backend = "auto"
+opencode_steps = 50
+opencode_rounds = 4
+opencode_timeout = 10800
+fallback_to_native = true
+opencode_subagents = false
+
+[scheduler]
+workers = 3
+# Longer than the slowest node. If nodes are being reclaimed mid-work, this is
+# the setting to raise.
+lease_seconds = 3600
+lease_renew_interval = 120
+max_attempts = 50           # catastrophic bound; progress detection stops first
+max_no_progress_attempts = 3
+max_transient_attempts = 0  # retry provider outages indefinitely
+backoff_max = 1800          # a provider outage should not become a hot loop
+heartbeat_interval = 60
+
+[budget]
+total_cost = 300.0          # notional when cost limits are disabled
+daily_cost = 40.0
+per_node_cost = 25.0
+enforce_cost_limits = false # subscriptions: govern share and hourly quota
+cloud_fraction_target = 0.08
+max_cloud_fraction = 0.60   # the hard project stop
+escalation_reserve = 0.30   # keep more in reserve on a long run
+stop_on_exhaustion = true
+
+[validation]
+gates = ["schema", "secrets", "format", "lint", "types", "build", "unit", "deps", "dangerous_patterns"]
+parallel = 4
+cache_results = true
+fail_fast = false           # collect every failure; one round trip, not five
+
+[memory]
+max_context_tokens = 28000
+retrieval_limit = 14
+
+[improvement]
+retrospective_after_milestone = true
+promote_findings_after = 3  # three sightings of a problem justifies tooling
+min_samples_for_routing_update = 10
+
+[deploy]
+enabled = false             # turn on deliberately, once you trust the output
+rollback_on_failure = true

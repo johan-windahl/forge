@@ -1,0 +1,71 @@
+# Local only: nothing leaves your network.
+#
+# Forge runs fine with only the local model -- the escalation ladder simply gets
+# shorter and the router adapts. Use this when the work is confidential, when the
+# subscriptions are rate-limited, or when you want a hard guarantee that no
+# request leaves the network.
+#
+# Expect: slower convergence on hard debugging, and a goal check that is more
+# likely to need a human. The deterministic gates are unaffected, and they are
+# what actually decides correctness.
+
+log_level = "info"
+
+[coding]
+backend = "auto"            # OpenCode if installed; native loop otherwise
+opencode_subagents = false  # Forge owns isolated local decomposition
+
+[models]
+# Two rungs on the same weights: the second thinks harder. This is the cheapest
+# possible escalation -- no network, no spend, materially better on hard tasks.
+ladder = ["local", "local_deep"]
+default = "local"
+
+[models.providers.local]
+# Tailnet-only, no authentication.
+base_url = "http://127.0.0.1:10000/v1"
+
+[models.models.local]
+provider = "local"
+model = "qwen3.6-27b"
+tier = "local"
+hosted = "local"
+context_window = 131072      # per slot, read from the server's /props
+max_output_tokens = 16384
+supports_json_schema = true  # llama.cpp constrains decoding with GBNF
+supports_vision = true       # the server reports vision and video
+concurrency = 4              # the server has four slots
+# Non-zero so the router does not treat local as unlimited; electricity and
+# wall-clock are real.
+input_cost_per_mtok = 0.02
+output_cost_per_mtok = 0.02
+# Thinking off: fast, and no risk of the answer being crowded out by reasoning.
+extra = { thinking = false, temperature = 0.7, top_p = 0.8, top_k = 20 }
+
+[models.models.local_deep]
+provider = "local"
+model = "qwen3.6-27b"
+tier = "mid"
+hosted = "local"
+context_window = 131072
+# Thinking is charged against the same output budget as the answer, so this
+# must stay large. Lowering it produces empty responses, not shorter ones.
+max_output_tokens = 32768
+supports_json_schema = true
+supports_vision = true
+concurrency = 2
+input_cost_per_mtok = 0.04
+output_cost_per_mtok = 0.04
+extra = { thinking = true, temperature = 0.6, top_p = 0.95, top_k = 20 }
+
+[budget]
+# Only bounds local compute time, since nothing here is billed.
+total_cost = 50.0
+daily_cost = 50.0
+cloud_fraction_target = 0.0
+
+[scheduler]
+workers = 2                 # 4 slots exist; 2 leaves headroom for gate work
+max_attempts = 50           # catastrophic bound; progress detection stops first
+max_no_progress_attempts = 3
+max_transient_attempts = 0

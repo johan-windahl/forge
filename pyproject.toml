@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "forge"
+version = "0.1.0"
+description = "Forge - an autonomous software engineering platform"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Johan Windahl", email = "johan@windahl.biz" }]
+
+# Deliberately zero required runtime dependencies.
+# The core (ledger, scheduler, model clients, gates, memory) runs on the
+# standard library alone. See docs/design-decisions.md#zero-dependency-core
+dependencies = []
+
+[project.optional-dependencies]
+browser = ["playwright>=1.44"]
+dev = ["pytest>=8", "pytest-timeout>=2.3", "ruff>=0.5", "mypy>=1.10"]
+
+[project.scripts]
+forge = "forge.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["forge*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+timeout = 120
+filterwarnings = ["error::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+# E501: line length is enforced by the formatter's target, not the linter.
+# SIM103: collapsing a guard-clause chain into one negated boolean expression
+#   reads worse than the early returns it replaces.
+ignore = ["E501", "SIM103"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_unused_ignores = true
+disallow_untyped_defs = false
