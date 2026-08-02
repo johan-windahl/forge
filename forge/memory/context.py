@@ -31,6 +31,7 @@ from typing import Any
 
 from ..models.types import Message, estimate_tokens
 from ..obs.log import get_logger
+from ..workspace.references import ReferenceStore
 from .records import MemoryKind, MemoryRecord
 
 log = get_logger("memory.context")
@@ -363,18 +364,44 @@ def reference_images(root: Path, *, limit: int = 6) -> list[Path]:
     the comparison worse. Derived diagnostics therefore sort last, and the
     default limit is high enough to carry a normal reference set intact.
     """
+    return [path for path, _ in reference_images_described(root, limit=limit)]
+
+
+def reference_images_described(root: Path, *, limit: int = 6) -> list[tuple[Path, str]]:
+    """Reference images paired with the operator's description of each.
+
+    The description is the half that used to be missing. The same screenshot can
+    mean "match this composition", "match this palette but not the layout", or
+    "this is what we are replacing", and a model shown the bare file has to
+    guess which -- differently each time it is asked.
+
+    A declared manifest wins over the filename heuristic below, because a
+    declaration cannot be wrong about its own role and a substring match can.
+    """
     suffixes = {".png", ".jpg", ".jpeg", ".webp"}
-    directories = [root / "docs" / "references", root.parent / ".forge" / "references"]
+    forge_dir = root.parent / ".forge"
+
+    described: list[tuple[Path, str]] = []
+    seen: set[Path] = set()
+    store = ReferenceStore(forge_dir)
+    if store.manifest_path.is_file():
+        for ref in store.load():
+            path = store.path_of(ref)
+            if ref.role == "visual" and path.is_file() and path.suffix.lower() in suffixes:
+                described.append((path, ref.description))
+                seen.add(path)
+
     found: list[Path] = []
-    for directory in directories:
+    for directory in (root / "docs" / "references", forge_dir / "references"):
         if not directory.is_dir():
             continue
         found.extend(
             path
             for path in directory.rglob("*")
-            if path.is_file() and path.suffix.lower() in suffixes
+            if path.is_file() and path.suffix.lower() in suffixes and path not in seen
         )
-    return sorted(found, key=_reference_rank)[:limit]
+    described.extend((path, "") for path in sorted(found, key=_reference_rank))
+    return described[:limit]
 
 
 def file_tree(root: Path, *, limit: int = 400, exclude: set[str] | None = None) -> str:

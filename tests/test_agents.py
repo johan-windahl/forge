@@ -103,7 +103,9 @@ def test_goal_images_use_reference_and_latest_capture_set(tmp_path: Path) -> Non
 
     refs, candidates = _goal_images(root, artifacts)
 
-    assert [path.name for path in refs] == ["nightmare.png"]
+    # References now travel with the operator's description of each; undeclared
+    # files found by directory scan carry an empty one.
+    assert [path.name for path, _ in refs] == ["nightmare.png"]
     assert [path.parent.name for path in candidates] == ["node_new", "node_new"]
 
 

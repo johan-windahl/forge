@@ -23,7 +23,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ..memory.context import P_ACCEPTANCE, P_FAILURE, P_TREE, file_tree, reference_images
+from ..memory.context import P_ACCEPTANCE, P_FAILURE, P_TREE, file_tree, reference_images_described
 from ..memory.records import MemoryKind
 from ..models.provider import encode_image
 from ..models.structured import array, boolean, enum, object_schema, string
@@ -132,7 +132,8 @@ delays a finished project.
         builder.add("What was built", file_tree(ctx.root, limit=300), priority=P_TREE, max_tokens=2000)
         builder.add("Work completed", self._work_summary(ctx), priority=P_TREE + 1, max_tokens=2500)
 
-        references, candidates = _goal_images(ctx.root, ctx.artifacts_dir)
+        described, candidates = _goal_images(ctx.root, ctx.artifacts_dir)
+        references = [path for path, _ in described]
         for path in [*references, *candidates]:
             try:
                 label = "reference" if path in references else "candidate"
@@ -140,16 +141,22 @@ delays a finished project.
             except OSError as exc:  # pragma: no cover - artifact disappeared
                 ctx.logger().warn("could not read goal image", path=str(path), error=str(exc))
         if references or candidates:
+            # The operator's note travels with the picture. Without it the model
+            # decides for itself what to imitate, and a reference supplied for
+            # its palette gets judged on its layout.
             builder.add(
                 "Visual evidence",
                 "\n".join(
                     [
-                        *(f"REFERENCE: {path.name}" for path in references),
+                        *(
+                            f"REFERENCE: {path.name}" + (f" -- {note}" if note else "")
+                            for path, note in described
+                        ),
                         *(f"CANDIDATE: {path.name}" for path in candidates),
                     ]
                 ),
                 priority=P_FAILURE,
-                max_tokens=200,
+                max_tokens=400,
             )
 
         open_findings = ctx.memory.open_findings()
@@ -426,12 +433,12 @@ def _gap_kind(gap: dict[str, Any]) -> str:
     return kind if kind in _GAP_KINDS else "implement"
 
 
-def _goal_images(root: Path, artifacts_dir: Path) -> tuple[list[Path], list[Path]]:
-    """Return the human reference and newest normal/screenshot-mode captures."""
+def _goal_images(root: Path, artifacts_dir: Path) -> tuple[list[tuple[Path, str]], list[Path]]:
+    """Return the described human references and newest captures."""
     # Deciding "does this look like the thing that was asked for" is the one
     # judgement with no deterministic gate behind it, so it gets the whole
     # reference set rather than whichever single file happened to sort first.
-    references = reference_images(root, limit=4)
+    references = reference_images_described(root, limit=4)
     def newest_capture(path: Path) -> int:
         try:
             return max(

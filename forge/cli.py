@@ -121,8 +121,14 @@ def _print(data: Any, as_json: bool) -> None:
 
 
 def cmd_init(args: argparse.Namespace) -> int:
+    from .workspace.references import ReferenceError, ReferenceStore
+
     config = _config(args)
-    goal = " ".join(args.goal).strip()
+    interactive = _can_prompt(args)
+
+    goal = " ".join(args.goal or []).strip()
+    if not goal and interactive:
+        goal = _ask_goal()
     if not goal:
         print("error: provide a project description", file=sys.stderr)
         return 2
@@ -131,13 +137,114 @@ def cmd_init(args: argparse.Namespace) -> int:
     if not config_path.exists() and not args.no_config:
         write_default_config(config_path)
 
+    store = ReferenceStore(config.forge_dir)
+    pending = [_split_reference(raw) for raw in (args.reference or [])]
+    if interactive and not pending:
+        pending = _ask_references()
+
+    added = []
+    for source, description in pending:
+        try:
+            ref = store.add(source, description=description)
+        except ReferenceError as exc:
+            # One bad URL must not discard a goal the operator just typed.
+            print(f"  skipped {source}: {exc.message}", file=sys.stderr)
+            continue
+        added.append(ref)
+
     with _orchestrator(config) as orchestrator:
         project = orchestrator.create_project(goal, name=args.name or "")
         print(f"Created project '{project.name}' in {config.project_dir}")
         print(f"  workspace: {config.workspace_dir}")
         print(f"  state:     {config.forge_dir}")
+        if added:
+            print(f"  references: {len(added)} in {store.root}")
+            for ref in added:
+                print(f"    [{ref.role}] {ref.label()}")
         print()
         print("Next: `forge run` to start building. It will keep going unattended.")
+        if not added:
+            print("Tip: `forge reference add <url|path>` supplies material to build against.")
+    return 0
+
+
+def _can_prompt(args: argparse.Namespace) -> bool:
+    """Only prompt a human who is actually there.
+
+    `forge init` runs in CI and in scripts as often as at a terminal. Blocking
+    on input in either would hang a pipeline with no indication why.
+    """
+    if getattr(args, "no_input", False):
+        return False
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _ask_goal() -> str:
+    print("What should Forge build? One or two sentences is enough; it plans the rest.")
+    try:
+        return input("> ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return ""
+
+
+def _ask_references() -> list[tuple[str, str]]:
+    """Collect reference material, one item at a time, until an empty line.
+
+    Asking for the description separately rather than parsing it out of one line
+    is deliberate: the description is the part operators skip, and a prompt that
+    names it gets an answer where a suggestion in help text does not.
+    """
+    print()
+    print("Reference material to build against? A URL or a local path:")
+    print("images, video, audio, documents, example files. Blank line when done.")
+    out: list[tuple[str, str]] = []
+    while True:
+        try:
+            source = input("reference> ").strip()
+            if not source:
+                return out
+            description = input("  what should Forge take from it? ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return out
+        out.append((source, description))
+
+
+def _split_reference(raw: str) -> tuple[str, str]:
+    """Parse ``source`` or ``source::description`` from a non-interactive flag."""
+    source, sep, description = raw.partition("::")
+    return source.strip(), description.strip() if sep else ""
+
+
+def cmd_reference(args: argparse.Namespace) -> int:
+    from .workspace.references import ReferenceError, ReferenceStore
+
+    config = _config(args, create=False)
+    store = ReferenceStore(config.forge_dir)
+
+    if args.reference_command == "list":
+        refs = store.load()
+        if not refs:
+            print(f"No references in {store.root}")
+            return 0
+        for ref in refs:
+            marker = " (derived)" if ref.is_derived else ""
+            print(f"[{ref.role}]{marker} {ref.label()}")
+            if ref.source:
+                print(f"    from {ref.source}")
+        return 0
+
+    added = []
+    for raw in args.source:
+        source, inline = _split_reference(raw)
+        try:
+            added.append(store.add(source, description=args.describe or inline, role=args.role or ""))
+        except ReferenceError as exc:
+            print(f"error: {exc.message}", file=sys.stderr)
+            return 1
+    for ref in added:
+        print(f"Added [{ref.role}] {ref.label()}")
     return 0
 
 
@@ -1375,10 +1482,32 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("init", help="create a project from a one-line description")
-    p.add_argument("goal", nargs="+", help="what to build")
+    # Optional: at a terminal with no goal, init asks for one and then for
+    # reference material. Scripts pass both as arguments and never see a prompt.
+    p.add_argument("goal", nargs="*", help="what to build (prompted for if omitted)")
     p.add_argument("--name", help="short project name (default: derived from the goal)")
     p.add_argument("--no-config", action="store_true", help="do not write a starter config file")
+    p.add_argument(
+        "--reference",
+        action="append",
+        metavar="SOURCE[::DESCRIPTION]",
+        help="reference material: a URL or local path, repeatable. Skips the prompt.",
+    )
+    p.add_argument("--no-input", action="store_true", help="never prompt; for scripts and CI")
     p.set_defaults(func=cmd_init)
+
+    p = sub.add_parser("reference", help="manage the material Forge builds against")
+    ref_sub = p.add_subparsers(dest="reference_command", required=True)
+    p_add = ref_sub.add_parser("add", help="fetch or copy reference material into the project")
+    p_add.add_argument("source", nargs="+", metavar="SOURCE[::DESCRIPTION]", help="URL or path")
+    p_add.add_argument("--describe", help="what Forge should take from it")
+    p_add.add_argument(
+        "--role",
+        choices=["visual", "motion", "audio", "document", "example", "other"],
+        help="override the role inferred from the file type",
+    )
+    ref_sub.add_parser("list", help="show the declared references")
+    p.set_defaults(func=cmd_reference)
 
     p = sub.add_parser("run", help="start or resume the build (detached by default)")
     p.add_argument("--workers", type=int, help="parallel node execution")

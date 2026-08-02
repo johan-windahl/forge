@@ -187,6 +187,33 @@ forge watch                       # follow along from another terminal
 forge report --open               # self-contained HTML dashboard
 ```
 
+### Showing it what good looks like
+
+Run `forge init` with no arguments at a terminal and it asks what to build, then
+asks for reference material: images, video, audio, documents, example files,
+given as a URL or a local path. It takes as many as you give it and asks what
+each one is for.
+
+That last question is the one that matters. The same screenshot can mean "match
+this composition", "match this palette but not the layout", or "this is what we
+are replacing". Shown a bare file, a model picks one of those readings, and not
+the same one each time.
+
+```bash
+forge reference add ./mockup.png --describe "target layout; our palette, not theirs"
+forge reference add https://example.com/demo.mp4 --describe "how the transition should feel"
+forge reference list
+```
+
+Remote material is fetched **once**, at add time, and stored with its hash under
+`.forge/references`. A run never reaches the network for a reference: a URL that
+changes underneath a project would move the target between milestones, and one
+that 404s mid-run would fail a comparison for a reason unrelated to the work.
+
+For scripts and CI, `--reference "SOURCE::description"` is repeatable and
+`--no-input` guarantees no prompt. Forge never prompts when stdin is not a
+terminal.
+
 Run it unattended:
 
 ```bash
